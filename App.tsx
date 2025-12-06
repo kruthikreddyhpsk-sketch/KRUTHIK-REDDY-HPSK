@@ -11,6 +11,7 @@ import JobAssistant from './components/JobAssistant';
 import Notebook from './components/Notebook';
 import GeneralAiChat from './components/GeneralAiChat';
 import Empowerment from './components/Empowerment';
+import EfficiencyBooster from './components/EfficiencyBooster';
 
 // Mock existing users for Admin Panel
 const MOCK_USERS: User[] = [
@@ -20,6 +21,7 @@ const MOCK_USERS: User[] = [
 
 enum Tab {
   PLANNER = 'PLANNER',
+  EFFICIENCY = 'EFFICIENCY',
   JOBS = 'JOBS',
   INCOME = 'INCOME',
   EMPOWERMENT = 'EMPOWERMENT',
@@ -33,6 +35,7 @@ enum Tab {
 
 const APP_FEATURES = [
   { id: Tab.PLANNER, icon: Calendar, label: 'Daily Planner', color: 'text-purple-500', bg: 'bg-purple-50' },
+  { id: Tab.EFFICIENCY, icon: Zap, label: 'Efficiency Booster', color: 'text-yellow-500', bg: 'bg-yellow-50' },
   { id: Tab.JOBS, icon: Briefcase, label: 'Job Assistant', color: 'text-orange-500', bg: 'bg-orange-50' },
   { id: Tab.EMPOWERMENT, icon: HeartHandshake, label: 'Empowerment', color: 'text-pink-500', bg: 'bg-pink-50' },
   { id: Tab.NOTEBOOK, icon: Book, label: 'Notebook', color: 'text-indigo-500', bg: 'bg-indigo-50' },
@@ -277,6 +280,7 @@ export default function App() {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-10">
                {[
                  { icon: Wallet, label: "Smart Income" },
+                 { icon: Zap, label: "Efficiency" },
                  { icon: Briefcase, label: "Job & Issues" },
                  { icon: HeartHandshake, label: "Empowerment" },
                  { icon: Calendar, label: "Daily Planner" },
@@ -888,6 +892,7 @@ export default function App() {
             {currentTab === Tab.NOTEBOOK && <Notebook />}
             {currentTab === Tab.GENERAL_AI && <GeneralAiChat />}
             {currentTab === Tab.EMPOWERMENT && <Empowerment user={currentUser!} />}
+            {currentTab === Tab.EFFICIENCY && <EfficiencyBooster user={currentUser!} />}
         </div>
 
       </main>
