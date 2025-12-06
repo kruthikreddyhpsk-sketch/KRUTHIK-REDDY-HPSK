@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Shield, User as UserIcon, LogOut, Wallet, HeartPulse, Siren, Scale, Lock, Users, LayoutDashboard, ChevronRight, PenLine, Calendar, Star, ArrowRight, Mic, Camera, Image as ImageIcon, X, Briefcase, IndianRupee, Zap, Book, Sparkles, AlertCircle, HeartHandshake } from 'lucide-react';
+import { Shield, User as UserIcon, LogOut, Wallet, HeartPulse, Siren, Scale, Lock, Users, LayoutDashboard, ChevronRight, PenLine, Calendar, Star, ArrowRight, Mic, Camera, Image as ImageIcon, X, Briefcase, IndianRupee, Book, Sparkles, AlertCircle, HeartHandshake, Activity, RefreshCcw, Wifi } from 'lucide-react';
 import { Screen, User } from './types';
 import IncomeStabilizer from './components/IncomeStabilizer';
 import SafetyBeacon from './components/SafetyBeacon';
@@ -11,17 +11,12 @@ import JobAssistant from './components/JobAssistant';
 import Notebook from './components/Notebook';
 import GeneralAiChat from './components/GeneralAiChat';
 import Empowerment from './components/Empowerment';
-import EfficiencyBooster from './components/EfficiencyBooster';
 
-// Mock existing users for Admin Panel
-const MOCK_USERS: User[] = [
-  { id: '1', fullName: 'John Doe', email: 'john@gig.com', password: 'password', phone: '1234567890', joinedDate: '2023-01-15', job: 'Delivery Driver', averageIncome: 25000 },
-  { id: '2', fullName: 'Jane Smith', email: 'jane@gig.com', password: 'password', phone: '0987654321', joinedDate: '2023-02-20', job: 'Freelance Writer', averageIncome: 30000 },
-];
+// Removed fake demo accounts as requested.
+const MOCK_USERS: User[] = [];
 
 enum Tab {
   PLANNER = 'PLANNER',
-  EFFICIENCY = 'EFFICIENCY',
   JOBS = 'JOBS',
   INCOME = 'INCOME',
   EMPOWERMENT = 'EMPOWERMENT',
@@ -35,7 +30,6 @@ enum Tab {
 
 const APP_FEATURES = [
   { id: Tab.PLANNER, icon: Calendar, label: 'Daily Planner', color: 'text-purple-500', bg: 'bg-purple-50' },
-  { id: Tab.EFFICIENCY, icon: Zap, label: 'Efficiency Booster', color: 'text-yellow-500', bg: 'bg-yellow-50' },
   { id: Tab.JOBS, icon: Briefcase, label: 'Job Assistant', color: 'text-orange-500', bg: 'bg-orange-50' },
   { id: Tab.EMPOWERMENT, icon: HeartHandshake, label: 'Empowerment', color: 'text-pink-500', bg: 'bg-pink-50' },
   { id: Tab.NOTEBOOK, icon: Book, label: 'Notebook', color: 'text-indigo-500', bg: 'bg-indigo-50' },
@@ -46,6 +40,14 @@ const APP_FEATURES = [
   { id: Tab.LAWS, icon: Scale, label: 'Labour Laws', color: 'text-indigo-500', bg: 'bg-indigo-50' },
   { id: Tab.VOICE, icon: Mic, label: 'Voice Assistant', color: 'text-cyan-500', bg: 'bg-cyan-50' },
 ];
+
+interface LogEntry {
+    id: string;
+    timestamp: string;
+    user: string;
+    action: string;
+    details?: string;
+}
 
 // Star Particle Component for Auth Screen - Updated to Sky Theme
 const StarBackground = () => {
@@ -89,7 +91,32 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>(Screen.LANDING);
   const [authMode, setAuthMode] = useState<'LOGIN' | 'SIGNUP'>('LOGIN');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [usersList, setUsersList] = useState<User[]>(MOCK_USERS);
+  
+  // Initialize usersList from localStorage to support persistent accounts
+  const [usersList, setUsersList] = useState<User[]>(() => {
+    try {
+      const savedUsers = localStorage.getItem('gigguard_users');
+      return savedUsers ? JSON.parse(savedUsers) : [];
+    } catch (e) {
+      console.error("Failed to load users", e);
+      return [];
+    }
+  });
+
+  // Admin Logs State
+  const [activityLogs, setActivityLogs] = useState<LogEntry[]>(() => {
+    try {
+        const savedLogs = localStorage.getItem('gigguard_logs');
+        return savedLogs ? JSON.parse(savedLogs) : [];
+    } catch (e) {
+        return [];
+    }
+  });
+
+  // Admin UX States
+  const [isLiveUpdating, setIsLiveUpdating] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
   const [currentTab, setCurrentTab] = useState<Tab>(Tab.PLANNER);
   const [amountSpent, setAmountSpent] = useState<number>(0);
   const [authError, setAuthError] = useState<string>("");
@@ -119,6 +146,79 @@ export default function App() {
   const profileVideoRef = useRef<HTMLVideoElement>(null);
   const profileCanvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Helper to log activities - saves to localStorage for "Live" tracking across tabs
+  const logActivity = (user: string, action: string, details?: string) => {
+    const newLog: LogEntry = {
+        id: Date.now().toString() + Math.random().toString().slice(2,6),
+        timestamp: new Date().toLocaleString(),
+        user,
+        action,
+        details
+    };
+    
+    // Read latest logs to ensure we don't overwrite from other tabs
+    try {
+        const existingLogs = JSON.parse(localStorage.getItem('gigguard_logs') || '[]');
+        const updated = [newLog, ...existingLogs].slice(0, 100); // Keep last 100 logs
+        localStorage.setItem('gigguard_logs', JSON.stringify(updated));
+        setActivityLogs(updated);
+    } catch (e) {
+        console.error("Failed to log activity", e);
+    }
+  };
+
+  // Live Tracking Effect for Admin Panel
+  useEffect(() => {
+    if (screen === Screen.ADMIN) {
+        const interval = setInterval(() => {
+            try {
+                const storedUsersRaw = localStorage.getItem('gigguard_users');
+                const storedLogsRaw = localStorage.getItem('gigguard_logs');
+                
+                const storedUsers = storedUsersRaw ? JSON.parse(storedUsersRaw) : [];
+                const storedLogs = storedLogsRaw ? JSON.parse(storedLogsRaw) : [];
+                
+                let hasUpdates = false;
+
+                // Simple deep equality check using stringify for small datasets
+                if (JSON.stringify(storedUsers) !== JSON.stringify(usersList)) {
+                    setUsersList(storedUsers);
+                    hasUpdates = true;
+                }
+                
+                // Optimized check for logs (compare most recent ID or length)
+                if (storedLogs.length !== activityLogs.length || (storedLogs.length > 0 && storedLogs[0].id !== activityLogs[0]?.id)) {
+                    setActivityLogs(storedLogs);
+                    hasUpdates = true;
+                }
+
+                if (hasUpdates) {
+                    setIsLiveUpdating(true);
+                    setTimeout(() => setIsLiveUpdating(false), 2000); // Flash update indicator
+                }
+
+            } catch (e) {
+                console.error("Polling error", e);
+            }
+        }, 1000); // Poll every second for live updates
+
+        return () => clearInterval(interval);
+    }
+  }, [screen, usersList, activityLogs]);
+
+  const handleManualRefresh = () => {
+      setIsRefreshing(true);
+      setTimeout(() => {
+        try {
+            const storedUsers = JSON.parse(localStorage.getItem('gigguard_users') || '[]');
+            const storedLogs = JSON.parse(localStorage.getItem('gigguard_logs') || '[]');
+            setUsersList(storedUsers);
+            setActivityLogs(storedLogs);
+        } catch(e) {}
+        setIsRefreshing(false);
+      }, 800);
+  };
+
   const handleProfilePictureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && currentUser) {
@@ -127,7 +227,14 @@ export default function App() {
         const result = reader.result as string;
         const updatedUser = { ...currentUser, profilePicture: result };
         setCurrentUser(updatedUser);
-        setUsersList(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+        
+        // Update local state and persistence
+        const currentStoredUsers = JSON.parse(localStorage.getItem('gigguard_users') || '[]');
+        const updatedList = currentStoredUsers.map((u: User) => u.id === currentUser.id ? updatedUser : u);
+        localStorage.setItem('gigguard_users', JSON.stringify(updatedList));
+        setUsersList(updatedList);
+        
+        logActivity(updatedUser.fullName, 'Updated Profile Picture');
         setShowProfileOptions(false);
       };
       reader.readAsDataURL(file);
@@ -177,7 +284,14 @@ export default function App() {
         const dataUrl = canvas.toDataURL('image/jpeg');
         const updatedUser = { ...currentUser, profilePicture: dataUrl };
         setCurrentUser(updatedUser);
-        setUsersList(prev => prev.map(u => u.id === currentUser.id ? updatedUser : u));
+        
+        // Update local state and persistence
+        const currentStoredUsers = JSON.parse(localStorage.getItem('gigguard_users') || '[]');
+        const updatedList = currentStoredUsers.map((u: User) => u.id === currentUser.id ? updatedUser : u);
+        localStorage.setItem('gigguard_users', JSON.stringify(updatedList));
+        setUsersList(updatedList);
+
+        logActivity(updatedUser.fullName, 'Updated Profile Picture (Camera)');
         stopProfileCamera();
       }
     }
@@ -185,46 +299,55 @@ export default function App() {
 
   const handleAuth = () => {
     setAuthError("");
+    const cleanEmail = email.trim();
+    const cleanPass = password.trim();
     
     if (authMode === 'LOGIN') {
-      if (!email || !password) {
+      if (!cleanEmail || !cleanPass) {
         setAuthError("Please fill in both email and password.");
         return;
       }
 
-      const foundUser = usersList.find(u => u.email.toLowerCase() === email.toLowerCase());
+      // Reload users from local storage to ensure we have the latest data
+      const currentUsers = JSON.parse(localStorage.getItem('gigguard_users') || '[]');
+      const foundUser = currentUsers.find((u: User) => u.email.toLowerCase() === cleanEmail.toLowerCase());
       
       if (foundUser) {
-        if (foundUser.password === password) {
+        if (foundUser.password === cleanPass) {
             setCurrentUser(foundUser);
             setAmountSpent(foundUser.averageIncome ? foundUser.averageIncome * 0.4 : 0);
+            logActivity(foundUser.fullName, 'Login', 'Success');
             setScreen(Screen.DASHBOARD);
         } else {
             setAuthError("Incorrect password. Please try again.");
+            logActivity(foundUser.fullName || cleanEmail, 'Login Failed', 'Incorrect Password');
         }
       } else {
          setAuthError("No account found with this email. Please Sign Up.");
       }
     } else {
       // SIGN UP
-      if (!fullName || !email || !password || !phone) {
+      if (!fullName.trim() || !cleanEmail || !cleanPass || !phone.trim()) {
         setAuthError("Please complete all fields to create an account.");
         return;
       }
       
-      if (usersList.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+      // Check duplicate in fresh storage
+      const currentUsers = JSON.parse(localStorage.getItem('gigguard_users') || '[]');
+      if (currentUsers.some((u: User) => u.email.toLowerCase() === cleanEmail.toLowerCase())) {
           setAuthError("This email is already registered. Please Log In.");
           return;
       }
 
       const newUser: User = {
         id: Date.now().toString(),
-        fullName,
-        email,
-        phone,
-        password,
+        fullName: fullName.trim(),
+        email: cleanEmail,
+        phone: phone.trim(),
+        password: cleanPass,
         joinedDate: new Date().toISOString().split('T')[0]
       };
+      // User is created but not yet saved to main list until questionnaire is done
       setCurrentUser(newUser);
       setScreen(Screen.QUESTIONNAIRE);
       setQuestionStep(0);
@@ -235,8 +358,19 @@ export default function App() {
     if (!currentUser) return;
     const incomeNum = parseFloat(avgIncome);
     const updatedUser = { ...currentUser, job, goal, averageIncome: incomeNum };
+    
+    // Read latest from LS to avoid overwrites
+    const currentStoredUsers = JSON.parse(localStorage.getItem('gigguard_users') || '[]');
+    const newUserList = [...currentStoredUsers, updatedUser];
+    
+    // Save new user to persistence first, then state
+    localStorage.setItem('gigguard_users', JSON.stringify(newUserList));
+    setUsersList(newUserList);
+    
+    // Log Activity
+    logActivity(updatedUser.fullName, 'User Registration', `Joined as ${job}`);
+
     setCurrentUser(updatedUser);
-    setUsersList(prev => [...prev, updatedUser]);
     setAmountSpent(incomeNum * 0.3);
     setScreen(Screen.DASHBOARD);
   };
@@ -254,8 +388,13 @@ export default function App() {
   const toggleAuthMode = (mode: 'LOGIN' | 'SIGNUP') => {
       setAuthMode(mode);
       setAuthError("");
-      // Optional: Clear form
-      // setEmail(''); setPassword(''); setFullName(''); setPhone('');
+  };
+
+  const handleTabChange = (tab: Tab) => {
+      setCurrentTab(tab);
+      if (currentUser) {
+          logActivity(currentUser.fullName, 'Navigation', `Accessed ${APP_FEATURES.find(f => f.id === tab)?.label}`);
+      }
   };
 
   // --- RENDER FUNCTIONS ---
@@ -280,7 +419,6 @@ export default function App() {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-10">
                {[
                  { icon: Wallet, label: "Smart Income" },
-                 { icon: Zap, label: "Efficiency" },
                  { icon: Briefcase, label: "Job & Issues" },
                  { icon: HeartHandshake, label: "Empowerment" },
                  { icon: Calendar, label: "Daily Planner" },
@@ -288,7 +426,8 @@ export default function App() {
                  { icon: HeartPulse, label: "Health AI" },
                  { icon: Book, label: "Notebook" },
                  { icon: Sparkles, label: "ProEffist AI" },
-                 { icon: Scale, label: "Legal Rights" }
+                 { icon: Scale, label: "Legal Rights" },
+                 { icon: Mic, label: "Voice Assistant" }
                ].map((f, i) => (
                  <div key={i} className="bg-white/40 backdrop-blur-md p-3 rounded-xl border border-white/60 text-sky-900 flex flex-col items-center gap-2 hover:bg-white/60 transition shadow-lg animate-fade-in" style={{ animationDelay: `${i * 50}ms` }}>
                     <f.icon className="w-5 h-5 text-sky-700" />
@@ -437,11 +576,6 @@ export default function App() {
             </button>
           </div>
           
-          {authMode === 'LOGIN' && (
-              <p className="mt-4 text-center text-xs text-sky-400">
-                  Demo Account: john@gig.com / password
-              </p>
-          )}
         </div>
       </div>
     );
@@ -551,65 +685,126 @@ export default function App() {
   }
 
   if (screen === Screen.ADMIN) {
+    const newSignupsCount = usersList.filter(u => u.joinedDate === new Date().toISOString().split('T')[0]).length;
+    
     return (
       <div className="min-h-screen bg-sky-900 text-white p-6">
-        <div className="max-w-6xl mx-auto">
-            <div className="flex justify-between items-center mb-8">
+        <div className="max-w-7xl mx-auto">
+            <div className="flex flex-wrap justify-between items-center mb-8 gap-4">
                 <h1 className="text-3xl font-bold flex items-center gap-3 text-sky-100">
                     <Shield className="w-8 h-8 text-sky-400" /> Admin Panel
                 </h1>
-                <button 
-                    onClick={() => setScreen(Screen.AUTH)}
-                    className="px-4 py-2 bg-sky-800 rounded-lg hover:bg-sky-700 transition text-sky-200"
-                >
-                    Log Out
-                </button>
+                <div className="flex items-center gap-4">
+                     <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold transition-all duration-500 border ${
+                         isLiveUpdating 
+                         ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.3)]' 
+                         : 'bg-emerald-900/30 border-transparent text-emerald-600'
+                     }`}>
+                         <div className={`w-2 h-2 rounded-full bg-emerald-400 ${isLiveUpdating ? 'animate-ping' : 'animate-pulse'}`}></div>
+                         {isLiveUpdating ? 'SYNCING DATA...' : 'LIVE MONITORING'}
+                     </div>
+                    <button 
+                        onClick={() => setScreen(Screen.AUTH)}
+                        className="px-4 py-2 bg-sky-800 rounded-lg hover:bg-sky-700 transition text-sky-200"
+                    >
+                        Log Out
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                <div className="bg-sky-800/50 p-6 rounded-xl border border-sky-700">
-                    <h3 className="text-sky-300 text-sm mb-1">Total Active Users</h3>
-                    <p className="text-4xl font-bold text-white">{usersList.length}</p>
+                <div className="bg-sky-800/50 p-6 rounded-xl border border-sky-700 transition hover:border-sky-500 group">
+                    <h3 className="text-sky-300 text-sm mb-1 group-hover:text-sky-200">Total Active Users</h3>
+                    <p className={`text-4xl font-bold text-white transition-all ${isLiveUpdating ? 'scale-105 text-sky-100' : ''}`}>{usersList.length}</p>
                 </div>
-                <div className="bg-sky-800/50 p-6 rounded-xl border border-sky-700">
-                    <h3 className="text-sky-300 text-sm mb-1">New Signups (Today)</h3>
-                    <p className="text-4xl font-bold text-emerald-400">1</p>
+                <div className="bg-sky-800/50 p-6 rounded-xl border border-sky-700 transition hover:border-emerald-500 group">
+                    <h3 className="text-sky-300 text-sm mb-1 group-hover:text-emerald-200">New Signups (Today)</h3>
+                    <p className={`text-4xl font-bold text-emerald-400 transition-all ${isLiveUpdating ? 'scale-105' : ''}`}>{newSignupsCount}</p>
                 </div>
-                <div className="bg-sky-800/50 p-6 rounded-xl border border-sky-700">
-                    <h3 className="text-sky-300 text-sm mb-1">System Status</h3>
-                    <p className="text-4xl font-bold text-sky-400">Stable</p>
+                <div className="bg-sky-800/50 p-6 rounded-xl border border-sky-700 transition hover:border-sky-500 group">
+                    <h3 className="text-sky-300 text-sm mb-1 group-hover:text-sky-200">System Events (24h)</h3>
+                    <p className={`text-4xl font-bold text-sky-400 transition-all ${isLiveUpdating ? 'scale-105' : ''}`}>{activityLogs.length}</p>
                 </div>
             </div>
 
-            <div className="bg-sky-800/50 rounded-xl overflow-hidden border border-sky-700">
-                <div className="p-6 border-b border-sky-700">
-                    <h2 className="text-xl font-semibold text-white">User Database</h2>
-                </div>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                        <thead className="bg-sky-800 text-sky-200">
-                            <tr>
-                                <th className="p-4">ID</th>
-                                <th className="p-4">Full Name</th>
-                                <th className="p-4">Email</th>
-                                <th className="p-4">Phone</th>
-                                <th className="p-4">Role</th>
-                                <th className="p-4">Joined</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-sky-700">
-                            {usersList.map(u => (
-                                <tr key={u.id} className="hover:bg-sky-700/50 transition">
-                                    <td className="p-4 font-mono text-sm text-sky-400">#{u.id}</td>
-                                    <td className="p-4 font-medium text-white">{u.fullName}</td>
-                                    <td className="p-4 text-sky-300">{u.email}</td>
-                                    <td className="p-4 text-sky-300">{u.phone}</td>
-                                    <td className="p-4"><span className="px-2 py-1 bg-sky-600 text-white rounded text-xs">{u.job || 'N/A'}</span></td>
-                                    <td className="p-4 text-sky-400">{u.joinedDate}</td>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* User Database */}
+                <div className="bg-sky-800/50 rounded-xl overflow-hidden border border-sky-700 flex flex-col h-[600px]">
+                    <div className="p-6 border-b border-sky-700 flex justify-between items-center bg-sky-900/20">
+                        <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                             <Users className="w-5 h-5 text-sky-400" /> Registered Users
+                        </h2>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xs text-sky-400 bg-sky-900/50 px-2 py-1 rounded">Real-time DB</span>
+                            <button onClick={handleManualRefresh} className={`text-sky-400 hover:text-sky-200 p-1 rounded-full hover:bg-sky-700 transition ${isRefreshing ? 'animate-spin' : ''}`}>
+                                <RefreshCcw className="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                    <div className="flex-1 overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead className="bg-sky-800 text-sky-200 sticky top-0 shadow-md">
+                                <tr>
+                                    <th className="p-4 text-xs uppercase font-bold tracking-wider">Full Name</th>
+                                    <th className="p-4 text-xs uppercase font-bold tracking-wider">Email</th>
+                                    <th className="p-4 text-xs uppercase font-bold tracking-wider">Role</th>
                                 </tr>
-                            ))}
-                        </tbody>
-                    </table>
+                            </thead>
+                            <tbody className="divide-y divide-sky-700/50 overflow-y-auto">
+                                {usersList.length > 0 ? usersList.map((u, i) => (
+                                    <tr key={u.id} className="hover:bg-sky-700/50 transition group animate-fade-in" style={{ animationDelay: `${i * 50}ms` }}>
+                                        <td className="p-4 font-medium text-white flex items-center gap-3">
+                                            {u.profilePicture ? <img src={u.profilePicture} className="w-9 h-9 rounded-full border border-sky-500 object-cover" alt="" /> : <div className="w-9 h-9 rounded-full bg-sky-600 flex items-center justify-center text-xs font-bold">{u.fullName[0]}</div>}
+                                            <span className="group-hover:text-sky-200 transition">{u.fullName}</span>
+                                        </td>
+                                        <td className="p-4 text-sky-300 text-sm font-mono">{u.email}</td>
+                                        <td className="p-4"><span className="px-2.5 py-1 bg-sky-700 text-sky-100 rounded-md text-xs font-medium border border-sky-600">{u.job || 'N/A'}</span></td>
+                                    </tr>
+                                )) : (
+                                    <tr>
+                                        <td colSpan={3} className="p-12 text-center text-sky-400 italic">No registered users yet.</td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                {/* Live Activity Logs */}
+                <div className="bg-sky-800/50 rounded-xl overflow-hidden border border-sky-700 flex flex-col h-[600px]">
+                     <div className="p-6 border-b border-sky-700 flex justify-between items-center bg-sky-900/20">
+                        <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+                            <Wifi className={`w-5 h-5 ${isLiveUpdating ? 'text-emerald-400 animate-pulse' : 'text-emerald-600'}`} /> 
+                            Live Activity Feed
+                        </h2>
+                         <div className="flex items-center gap-3">
+                            <button onClick={handleManualRefresh} className={`text-sky-400 hover:text-sky-200 p-1 rounded-full hover:bg-sky-700 transition ${isRefreshing ? 'animate-spin' : ''}`}>
+                                <RefreshCcw className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => { localStorage.removeItem('gigguard_logs'); setActivityLogs([]); }} className="text-xs text-red-300 hover:text-red-100 hover:bg-red-900/30 px-2 py-1 rounded transition">Clear Logs</button>
+                         </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3 scrollbar-thin scrollbar-thumb-sky-600 scrollbar-track-transparent">
+                        {activityLogs.length > 0 ? activityLogs.map((log) => (
+                            <div key={log.id} className={`bg-sky-900/40 p-4 rounded-xl border border-sky-700/50 flex items-start gap-4 animate-slide-in-right hover:bg-sky-800/50 transition ${log.action.includes('Login') ? 'border-l-4 border-l-emerald-500' : 'border-l-4 border-l-sky-500'}`}>
+                                <div className="mt-1">
+                                    <div className={`w-2.5 h-2.5 rounded-full ${log.action.includes('Login') ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : log.action.includes('Registration') ? 'bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.6)]' : 'bg-sky-400'}`}></div>
+                                </div>
+                                <div className="flex-1">
+                                    <div className="flex justify-between items-start mb-1">
+                                        <p className="text-sm font-bold text-sky-100">{log.user}</p>
+                                        <span className="text-[10px] text-sky-500 font-mono bg-sky-900/50 px-1.5 py-0.5 rounded">{log.timestamp.split(',')[1]}</span>
+                                    </div>
+                                    <p className="text-xs text-sky-300 leading-relaxed"><span className="text-sky-200 font-semibold">{log.action}</span> {log.details && <span className="text-sky-400">— {log.details}</span>}</p>
+                                </div>
+                            </div>
+                        )) : (
+                            <div className="text-center py-20 text-sky-500 flex flex-col items-center">
+                                <Activity className="w-12 h-12 mb-4 opacity-20" />
+                                <p>Waiting for live user activity...</p>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
         </div>
@@ -649,7 +844,7 @@ export default function App() {
          {APP_FEATURES.map((item) => (
              <button
                 key={item.id}
-                onClick={() => setCurrentTab(item.id)}
+                onClick={() => handleTabChange(item.id as Tab)}
                 className={`group relative p-3 rounded-2xl transition-all duration-300 flex flex-col items-center gap-1 ${currentTab === item.id ? 'bg-sky-100 text-sky-600 translate-x-1' : 'text-slate-400 hover:text-sky-500 hover:bg-sky-50'}`}
              >
                  {currentTab === item.id && (
@@ -719,7 +914,7 @@ export default function App() {
                                 <button 
                                     key={feat.id}
                                     onClick={() => {
-                                        setCurrentTab(feat.id);
+                                        handleTabChange(feat.id as Tab);
                                         setShowUserProfile(false);
                                     }}
                                     className={`flex items-center gap-3 p-4 rounded-2xl border transition-all hover:scale-[1.02] active:scale-[0.98] ${feat.bg} border-transparent hover:shadow-md text-left`}
@@ -737,6 +932,7 @@ export default function App() {
                         onClick={() => {
                              setShowUserProfile(false);
                              setScreen(Screen.AUTH);
+                             logActivity(currentUser.fullName, 'Logout');
                         }}
                         className="w-full mt-6 py-4 rounded-2xl border border-red-100 text-red-500 font-bold hover:bg-red-50 transition flex items-center justify-center gap-2"
                     >
@@ -892,7 +1088,6 @@ export default function App() {
             {currentTab === Tab.NOTEBOOK && <Notebook />}
             {currentTab === Tab.GENERAL_AI && <GeneralAiChat />}
             {currentTab === Tab.EMPOWERMENT && <Empowerment user={currentUser!} />}
-            {currentTab === Tab.EFFICIENCY && <EfficiencyBooster user={currentUser!} />}
         </div>
 
       </main>

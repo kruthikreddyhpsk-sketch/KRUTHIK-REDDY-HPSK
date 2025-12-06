@@ -13,7 +13,7 @@ const VoiceAssistant: React.FC = () => {
   const streamRef = useRef<MediaStream | null>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const nextStartTimeRef = useRef<number>(0);
-  const sessionRef = useRef<any>(null);
+  const sessionRef = useRef<Promise<any> | null>(null);
 
   // Helper: Decode Audio
   const decode = (base64: string) => {
@@ -46,8 +46,8 @@ const VoiceAssistant: React.FC = () => {
     return buffer;
   };
 
-  // Helper: Create Blob for PCM
-  const createBlob = (data: Float32Array) => {
+  // Helper: Create Payload for PCM
+  const createPayload = (data: Float32Array) => {
     const l = data.length;
     const int16 = new Int16Array(l);
     for (let i = 0; i < l; i++) {
@@ -69,29 +69,48 @@ const VoiceAssistant: React.FC = () => {
     };
   };
 
-  const stopSession = () => {
+  const stopSession = async () => {
     // Cleanup Input
     if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
         streamRef.current = null;
     }
+    
     if (inputAudioContextRef.current) {
-        inputAudioContextRef.current.close();
+        // Just close it, don't wait indefinitely
+        try { inputAudioContextRef.current.close(); } catch(e) {}
         inputAudioContextRef.current = null;
     }
 
     // Cleanup Output
     if (outputAudioContextRef.current) {
-        outputAudioContextRef.current.close();
+        try { outputAudioContextRef.current.close(); } catch(e) {}
         outputAudioContextRef.current = null;
     }
     
     // Stop Session
+    if (sessionRef.current) {
+        try {
+            const session = await sessionRef.current;
+            session.close();
+        } catch (e) {
+            console.log("Session close (harmless):", e);
+        }
+        sessionRef.current = null;
+    }
+    
+    // Stop all playing sources
+    sourcesRef.current.forEach(source => {
+        try { source.stop(); } catch(e) {}
+    });
+    sourcesRef.current.clear();
+    
     setActive(false);
     setStatus('idle');
   };
 
   const startSession = async () => {
+    if (active) return;
     setError(null);
     setStatus('connecting');
     setActive(true);
@@ -102,6 +121,10 @@ const VoiceAssistant: React.FC = () => {
         // Setup Audio Contexts
         const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
         const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+        
+        // Resume contexts immediately
+        await Promise.all([inputCtx.resume(), outputCtx.resume()]);
+
         inputAudioContextRef.current = inputCtx;
         outputAudioContextRef.current = outputCtx;
         nextStartTimeRef.current = 0;
@@ -121,13 +144,24 @@ const VoiceAssistant: React.FC = () => {
                     setStatus('listening');
                     // Setup Input Processing
                     const source = inputCtx.createMediaStreamSource(stream);
-                    const scriptProcessor = inputCtx.createScriptProcessor(4096, 1, 1);
+                    // Use smaller buffer (2048) for lower latency
+                    const scriptProcessor = inputCtx.createScriptProcessor(2048, 1, 1);
                     
                     scriptProcessor.onaudioprocess = (e) => {
+                        // Avoid processing if context is closed/closing
+                        if (!inputCtx || inputCtx.state === 'closed') return;
+                        
                         const inputData = e.inputBuffer.getChannelData(0);
-                        const pcmBlob = createBlob(inputData);
+                        const payload = createPayload(inputData);
+                        
                         sessionPromise.then(session => {
-                            session.sendRealtimeInput({ media: pcmBlob });
+                             // Double check state before sending to avoid "Network Error" on closed socket
+                             if (inputAudioContextRef.current) {
+                                session.sendRealtimeInput({ media: payload });
+                             }
+                        }).catch(err => {
+                             // Suppress errors during shutdown
+                             console.log("Send ignored:", err);
                         });
                     };
 
@@ -139,8 +173,8 @@ const VoiceAssistant: React.FC = () => {
                     
                     if (base64Audio) {
                         setStatus('speaking');
-                        // Reset to listening after a delay if needed, but 'speaking' UI state is fine while audio plays
                         
+                        // Ensure we schedule ahead
                         nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
                         
                         const audioBuffer = await decodeAudioData(
@@ -155,7 +189,6 @@ const VoiceAssistant: React.FC = () => {
                         source.connect(outputNode);
                         source.addEventListener('ended', () => {
                             sourcesRef.current.delete(source);
-                            // If no more sources playing, set back to listening (approximate)
                             if (sourcesRef.current.size === 0) {
                                 setStatus('listening');
                             }
@@ -165,6 +198,14 @@ const VoiceAssistant: React.FC = () => {
                         nextStartTimeRef.current += audioBuffer.duration;
                         sourcesRef.current.add(source);
                     }
+                    
+                    const interrupted = msg.serverContent?.interrupted;
+                    if (interrupted) {
+                        sourcesRef.current.forEach(s => s.stop());
+                        sourcesRef.current.clear();
+                        nextStartTimeRef.current = 0;
+                        setStatus('listening');
+                    }
                 },
                 onclose: () => {
                     setStatus('idle');
@@ -172,8 +213,11 @@ const VoiceAssistant: React.FC = () => {
                 },
                 onerror: (err) => {
                     console.error("Live API Error:", err);
-                    setError("Connection failed.");
-                    stopSession();
+                    // Only show error if we were actually trying to be active
+                    if (active) {
+                         setError("Connection interrupted. Please try again.");
+                         stopSession();
+                    }
                 }
             },
             config: {
@@ -181,7 +225,7 @@ const VoiceAssistant: React.FC = () => {
                 speechConfig: {
                     voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } }
                 },
-                systemInstruction: "You are a helpful, fast-responding voice assistant for a gig worker. Keep answers concise.",
+                systemInstruction: "You are a friendly, ultra-fast AI assistant for gig workers. Keep responses short (1-2 sentences), concise, and helpful. React immediately.",
             }
         });
         
@@ -190,9 +234,9 @@ const VoiceAssistant: React.FC = () => {
     } catch (err: any) {
         console.error("Failed to start session:", err);
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-             setError("Microphone permission required. Please allow access.");
+             setError("Microphone permission required.");
         } else {
-             setError("Could not access microphone or connect to AI.");
+             setError("Could not connect to AI. Please check network.");
         }
         setStatus('idle');
         setActive(false);
@@ -201,6 +245,7 @@ const VoiceAssistant: React.FC = () => {
 
   useEffect(() => {
     return () => {
+        // Cleanup on unmount
         stopSession();
     };
   }, []);
@@ -243,7 +288,8 @@ const VoiceAssistant: React.FC = () => {
             {!active ? (
                 <button 
                     onClick={startSession}
-                    className="bg-cyan-500 hover:bg-cyan-400 text-sky-950 font-bold py-4 px-10 rounded-full text-lg shadow-lg transition-transform transform active:scale-95 flex items-center gap-2 mx-auto"
+                    disabled={status === 'connecting'}
+                    className="bg-cyan-500 hover:bg-cyan-400 text-sky-950 font-bold py-4 px-10 rounded-full text-lg shadow-lg transition-transform transform active:scale-95 flex items-center gap-2 mx-auto disabled:opacity-50"
                 >
                     <Mic className="w-5 h-5" /> Start Conversation
                 </button>
@@ -258,7 +304,7 @@ const VoiceAssistant: React.FC = () => {
         </div>
 
         {error && (
-            <p className="mt-4 text-red-300 text-sm relative z-10">{error}</p>
+            <p className="mt-4 text-red-300 text-sm relative z-10 bg-red-900/50 px-4 py-2 rounded-lg">{error}</p>
         )}
       </div>
     </div>
