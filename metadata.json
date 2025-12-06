@@ -1,0 +1,9 @@
+{
+  "name": "GIGGUARD",
+  "description": "A comprehensive efficiency, safety, and health platform designed specifically for gig workers.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone",
+    "camera"
+  ]
+}
